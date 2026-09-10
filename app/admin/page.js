@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
-import { books } from '../data';
 import { isAdmin, signIn, signOut } from '../lib/auth';
+import { hasDatabase, listBooks } from '../lib/db';
 import AdminClient from './AdminClient';
 
 async function loginAction(formData) {
@@ -35,9 +35,10 @@ export default async function AdminPage({ searchParams }) {
         {query?.error ? <p className="error">Incorrect password.</p> : null}
         <button className="button primary" type="submit">Sign in</button>
       </form>
-      <p className="muted" style={{fontSize:'.78rem',marginTop:18}}>Authentication is verified on the server and stored in an HTTP-only session cookie.</p>
     </div></div></main>;
   }
 
-  return <AdminClient books={books} logoutAction={logoutAction} />;
+  const databaseReady=hasDatabase();
+  const books=await listBooks({admin:true});
+  return <AdminClient initialBooks={books} databaseReady={databaseReady} logoutAction={logoutAction} />;
 }
