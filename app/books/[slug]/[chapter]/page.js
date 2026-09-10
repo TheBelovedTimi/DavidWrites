@@ -5,18 +5,25 @@ import ReaderProgress from '../../../components/ReaderProgress';
 
 export const dynamic='force-dynamic';
 
+function RichContent({block}){
+  const style={textAlign:block.align || 'left'};
+  if(block.html) return <span style={style} dangerouslySetInnerHTML={{__html:block.html}}/>;
+  return <span style={style}>{block.text}</span>;
+}
+
 function Block({ block }) {
   if (!block) return null;
+  const style={textAlign:block.align || 'left'};
   if (block.type === 'divider') return <div className="ornament">···</div>;
-  if (block.type === 'heading_1') return <h1>{block.text}</h1>;
-  if (block.type === 'heading_2') return <h2>{block.text}</h2>;
-  if (block.type === 'heading_3') return <h3>{block.text}</h3>;
-  if (block.type === 'quote') return <blockquote>{block.text}</blockquote>;
-  if (block.type === 'bulleted_list_item') return <ul><li>{block.text}</li></ul>;
-  if (block.type === 'numbered_list_item') return <ol><li>{block.text}</li></ol>;
+  if (block.type === 'heading_1') return <h1 style={style}><RichContent block={block}/></h1>;
+  if (block.type === 'heading_2') return <h2 style={style}><RichContent block={block}/></h2>;
+  if (block.type === 'heading_3') return <h3 style={style}><RichContent block={block}/></h3>;
+  if (block.type === 'quote') return <blockquote style={style}><RichContent block={block}/></blockquote>;
+  if (block.type === 'bulleted_list_item') return <ul style={style}><li><RichContent block={block}/></li></ul>;
+  if (block.type === 'numbered_list_item') return <ol style={style}><li><RichContent block={block}/></li></ol>;
   if (block.type === 'toggle') return <details className="toggle"><summary>{block.text || 'Open'}</summary>{block.children?.map((child, i) => <Block key={i} block={child} />)}</details>;
   if (block.type === 'image' && block.url) return <figure className="notion-image"><img src={block.url} alt={block.caption || ''} />{block.caption ? <figcaption>{block.caption}</figcaption> : null}</figure>;
-  return <p>{block.text}</p>;
+  return <p style={style}><RichContent block={block}/></p>;
 }
 
 function Nav({ book, index, bottom = false }) {
