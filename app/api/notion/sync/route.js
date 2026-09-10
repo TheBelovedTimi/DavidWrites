@@ -1,17 +1,16 @@
 import { NextResponse } from 'next/server';
 import { isAdmin } from '../../../lib/auth';
 
-const NOTION_VERSION = '2022-06-28';
+const NOTION_VERSION = '2026-03-11';
 
 function normalizeId(source = '') {
   const clean = source.trim();
-  const match = clean.match(/[0-9a-fA-F]{32}/g)?.pop();
-  if (match) {
-    const x = match.toLowerCase();
+  const undashed = clean.match(/[0-9a-fA-F]{32}/g)?.pop();
+  if (undashed) {
+    const x = undashed.toLowerCase();
     return `${x.slice(0,8)}-${x.slice(8,12)}-${x.slice(12,16)}-${x.slice(16,20)}-${x.slice(20)}`;
   }
-  const dashed = clean.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/)?.[0];
-  return dashed || clean;
+  return clean.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/)?.[0] || clean;
 }
 
 function richText(items = []) {
@@ -19,8 +18,7 @@ function richText(items = []) {
 }
 
 function titleFromPage(page) {
-  const props = page?.properties || {};
-  for (const value of Object.values(props)) {
+  for (const value of Object.values(page?.properties || {})) {
     if (value?.type === 'title') return richText(value.title) || 'Untitled';
   }
   return 'Untitled';
@@ -54,11 +52,12 @@ async function notionFetch(path, token, init = {}) {
 }
 
 async function getChildren(blockId, token) {
-  let cursor;
+  let cursor = null;
   const blocks = [];
   do {
-    const suffix = cursor ? `?page_size=100&start_cursor=${encodeURIComponent(cursor)}` : '?page_size=100';
-    const { response, body } = await notionFetch(`/blocks/${blockId}/children${suffix}`, token);
+    const params = new URLSearchParams({ page_size: '100' });
+    if (cursor) params.set('start_cursor', cursor);
+    const { response, body } = await notionFetch(`/blocks/${blockId}/children?${params}`, token);
     if (!response.ok) throw new Error(body?.message || `Unable to read Notion blocks (${response.status})`);
     for (const block of body.results || []) {
       const mapped = mapBlock(block);
@@ -70,36 +69,52 @@ async function getChildren(blockId, token) {
   return blocks;
 }
 
-async function getPage(pageId, token) {
-  const { response, body } = await notionFetch(`/pages/${pageId}`, token);
-  if (!response.ok) return null;
+async function hydratePage(page, token) {
   return {
-    id: body.id,
-    title: titleFromPage(body),
-    url: body.url,
-    blocks: await getChildren(body.id, token)
+    id: page.id,
+    title: titleFromPage(page),
+    url: page.url,
+    blocks: await getChildren(page.id, token)
   };
+}
+
+async function getPage(id, token) {
+  const { response, body } = await notionFetch(`/pages/${id}`, token);
+  return response.ok ? hydratePage(body, token) : null;
+}
+
+async function queryDataSource(dataSourceId, token) {
+  const meta = await notionFetch(`/data_sources/${dataSourceId}`, token);
+  if (!meta.response.ok) return null;
+  let cursor = null;
+  const pages = [];
+  do {
+    const payload = { page_size: 50, result_type: 'page' };
+    if (cursor) payload.start_cursor = cursor;
+    const query = await notionFetch(`/data_sources/${dataSourceId}/query`, token, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    if (!query.response.ok) throw new Error(query.body?.message || `Unable to query Notion data source (${query.response.status})`);
+    for (const page of query.body.results || []) {
+      if (page.object === 'page') pages.push(await hydratePage(page, token));
+    }
+    cursor = query.body.has_more ? query.body.next_cursor : null;
+  } while (cursor && pages.length < 100);
+  return { id: meta.body.id, title: meta.body.name || 'Notion data source', pages };
 }
 
 async function getDatabase(databaseId, token) {
   const meta = await notionFetch(`/databases/${databaseId}`, token);
   if (!meta.response.ok) return null;
-  const query = await notionFetch(`/databases/${databaseId}/query`, token, {
-    method: 'POST',
-    body: JSON.stringify({ page_size: 25 })
-  });
-  if (!query.response.ok) throw new Error(query.body?.message || `Unable to query Notion database (${query.response.status})`);
+  const sources = meta.body.data_sources || [];
   const pages = [];
-  for (const page of query.body.results || []) {
-    pages.push({
-      id: page.id,
-      title: titleFromPage(page),
-      url: page.url,
-      blocks: await getChildren(page.id, token)
-    });
+  for (const source of sources) {
+    const result = await queryDataSource(source.id, token);
+    if (result) pages.push(...result.pages);
   }
   const databaseTitle = richText(meta.body?.title) || 'Notion database';
-  return { id: meta.body.id, title: databaseTitle, pages };
+  return { id: meta.body.id, title: databaseTitle, pages, dataSources: sources.map((s) => ({ id: s.id, name: s.name })) };
 }
 
 export async function POST(request) {
@@ -114,6 +129,9 @@ export async function POST(request) {
 
     const page = await getPage(id, token);
     if (page) return NextResponse.json({ ok: true, kind: 'page', sourceId: id, page });
+
+    const dataSource = await queryDataSource(id, token);
+    if (dataSource) return NextResponse.json({ ok: true, kind: 'database', sourceId: id, database: dataSource });
 
     const database = await getDatabase(id, token);
     if (database) return NextResponse.json({ ok: true, kind: 'database', sourceId: id, database });
