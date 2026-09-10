@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isAdmin } from '../../lib/auth';
-import { hasDatabase, listBooks, listTrash, permanentlyDeleteBook, permanentlyDeleteChapter, restoreBook, restoreChapter, saveBook, saveChapter, trashBook, trashChapter } from '../../lib/db';
+import { getAnalytics, hasDatabase, listBooks, listTrash, permanentlyDeleteBook, permanentlyDeleteChapter, restoreBook, restoreChapter, saveBook, saveChapter, trashBook, trashChapter } from '../../lib/db';
 
 async function guard() {
   if (!(await isAdmin())) return NextResponse.json({ ok:false,error:'Unauthorized' },{status:401});
@@ -10,7 +10,7 @@ async function guard() {
 
 export async function GET(){
   const blocked=await guard(); if(blocked) return blocked;
-  try { return NextResponse.json({ok:true,books:await listBooks({admin:true}),trash:await listTrash()}); }
+  try { return NextResponse.json({ok:true,books:await listBooks({admin:true}),trash:await listTrash(),analytics:await getAnalytics()}); }
   catch(error){ return NextResponse.json({ok:false,error:error.message || 'Could not load CMS.'},{status:500}); }
 }
 
