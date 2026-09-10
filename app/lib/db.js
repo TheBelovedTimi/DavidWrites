@@ -29,6 +29,7 @@ async function ensureSchema() {
     status TEXT NOT NULL DEFAULT 'Draft',
     teaser TEXT NOT NULL DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`;
@@ -43,10 +44,14 @@ async function ensureSchema() {
     read_minutes INTEGER NOT NULL DEFAULT 1,
     content JSONB NOT NULL DEFAULT '[]'::jsonb,
     sort_order INTEGER NOT NULL DEFAULT 0,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(book_id, slug)
   )`;
+  await q`ALTER TABLE books ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+  await q`ALTER TABLE chapters ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+
   const rows = await q`SELECT COUNT(*)::int AS count FROM books`;
   if ((rows[0]?.count || 0) === 0) {
     for (let b=0; b<seedBooks.length; b++) {
@@ -64,44 +69,6 @@ async function ensureSchema() {
   bootstrapped = true;
 }
 
-export async function listBooks({ admin=false }={}) {
-  if (!hasDatabase()) return seedBooks;
-  await ensureSchema();
-  const q = sql();
-  const books = admin
-    ? await q`SELECT * FROM books ORDER BY sort_order,id`
-    : await q`SELECT * FROM books WHERE status IN ('Published','Coming Soon') ORDER BY sort_order,id`;
-  const result = [];
-  for (const book of books) {
-    const chapters = admin
-      ? await q`SELECT * FROM chapters WHERE book_id=${book.id} ORDER BY sort_order,id`
-      : await q`SELECT * FROM chapters WHERE book_id=${book.id} AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;
-    result.push(normalizeBook(book, chapters));
-  }
-  return result;
-}
-
-export async function getBookBySlug(slug,{admin=false}={}) {
-  if (!hasDatabase()) return seedBooks.find(b=>b.slug===slug) || null;
-  await ensureSchema();
-  const q=sql();
-  const rows = admin
-    ? await q`SELECT * FROM books WHERE slug=${slug} LIMIT 1`
-    : await q`SELECT * FROM books WHERE slug=${slug} AND status IN ('Published','Coming Soon') LIMIT 1`;
-  if (!rows[0]) return null;
-  const chapters = admin
-    ? await q`SELECT * FROM chapters WHERE book_id=${rows[0].id} ORDER BY sort_order,id`
-    : await q`SELECT * FROM chapters WHERE book_id=${rows[0].id} AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;
-  return normalizeBook(rows[0], chapters);
-}
-
-export async function getChapterBySlug(bookSlug, chapterSlug,{admin=false}={}) {
-  const book=await getBookBySlug(bookSlug,{admin});
-  if (!book) return {book:null,chapter:null};
-  const chapter=(book.chapters || []).find(c=>c.slug===chapterSlug) || null;
-  return {book,chapter};
-}
-
 function normalizeBook(book, chapters=[]) {
   return {
     id:book.id,
@@ -112,6 +79,7 @@ function normalizeBook(book, chapters=[]) {
     accent:book.accent || 'violet',
     status:book.status,
     teaser:book.teaser || '',
+    deletedAt:book.deleted_at || null,
     chapters:chapters.map(c=>({
       id:c.id,
       title:c.title,
@@ -121,19 +89,75 @@ function normalizeBook(book, chapters=[]) {
       status:c.status,
       read:`${c.read_minutes || 1} min read`,
       readMinutes:c.read_minutes || 1,
+      deletedAt:c.deleted_at || null,
       blocks:Array.isArray(c.content) ? c.content : []
     }))
   };
+}
+
+export async function listBooks({ admin=false }={}) {
+  if (!hasDatabase()) return seedBooks;
+  await ensureSchema();
+  const q = sql();
+  const books = admin
+    ? await q`SELECT * FROM books WHERE deleted_at IS NULL ORDER BY sort_order,id`
+    : await q`SELECT * FROM books WHERE deleted_at IS NULL AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;
+  const result = [];
+  for (const book of books) {
+    const chapters = admin
+      ? await q`SELECT * FROM chapters WHERE book_id=${book.id} AND deleted_at IS NULL ORDER BY sort_order,id`
+      : await q`SELECT * FROM chapters WHERE book_id=${book.id} AND deleted_at IS NULL AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;
+    result.push(normalizeBook(book, chapters));
+  }
+  return result;
+}
+
+export async function listTrash() {
+  await ensureSchema();
+  const q=sql();
+  const bookRows=await q`SELECT * FROM books WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`;
+  const books=[];
+  for (const book of bookRows) {
+    const chapters=await q`SELECT * FROM chapters WHERE book_id=${book.id} ORDER BY sort_order,id`;
+    books.push(normalizeBook(book,chapters));
+  }
+  const chapterRows=await q`SELECT c.*, b.title AS book_title, b.slug AS book_slug FROM chapters c JOIN books b ON b.id=c.book_id WHERE c.deleted_at IS NOT NULL AND b.deleted_at IS NULL ORDER BY c.deleted_at DESC`;
+  const chapters=chapterRows.map(c=>({
+    id:c.id,title:c.title,slug:c.slug,type:c.type || 'Chapter',status:c.status,deletedAt:c.deleted_at,
+    bookId:c.book_id,bookTitle:c.book_title,bookSlug:c.book_slug
+  }));
+  return {books,chapters};
+}
+
+export async function getBookBySlug(slug,{admin=false}={}) {
+  if (!hasDatabase()) return seedBooks.find(b=>b.slug===slug) || null;
+  await ensureSchema();
+  const q=sql();
+  const rows = admin
+    ? await q`SELECT * FROM books WHERE slug=${slug} AND deleted_at IS NULL LIMIT 1`
+    : await q`SELECT * FROM books WHERE slug=${slug} AND deleted_at IS NULL AND status IN ('Published','Coming Soon') LIMIT 1`;
+  if (!rows[0]) return null;
+  const chapters = admin
+    ? await q`SELECT * FROM chapters WHERE book_id=${rows[0].id} AND deleted_at IS NULL ORDER BY sort_order,id`
+    : await q`SELECT * FROM chapters WHERE book_id=${rows[0].id} AND deleted_at IS NULL AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;
+  return normalizeBook(rows[0], chapters);
+}
+
+export async function getChapterBySlug(bookSlug, chapterSlug,{admin=false}={}) {
+  const book=await getBookBySlug(bookSlug,{admin});
+  if (!book) return {book:null,chapter:null};
+  const chapter=(book.chapters || []).find(c=>c.slug===chapterSlug) || null;
+  return {book,chapter};
 }
 
 export async function saveBook(input) {
   await ensureSchema(); const q=sql();
   const status=['Draft','Coming Soon','Published'].includes(input.status) ? input.status : 'Draft';
   if (input.id) {
-    const rows=await q`UPDATE books SET title=${input.title},slug=${slugify(input.slug || input.title)},description=${input.description || ''},label=${input.label || ''},accent=${input.accent || 'violet'},status=${status},teaser=${input.teaser || ''},updated_at=NOW() WHERE id=${input.id} RETURNING id,slug`;
+    const rows=await q`UPDATE books SET title=${input.title},slug=${slugify(input.slug || input.title)},description=${input.description || ''},label=${input.label || ''},accent=${input.accent || 'violet'},status=${status},teaser=${input.teaser || ''},updated_at=NOW() WHERE id=${input.id} AND deleted_at IS NULL RETURNING id,slug`;
     return rows[0];
   }
-  const max=await q`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM books`;
+  const max=await q`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM books WHERE deleted_at IS NULL`;
   const rows=await q`INSERT INTO books(title,slug,description,label,accent,status,teaser,sort_order) VALUES(${input.title},${slugify(input.slug || input.title)},${input.description || ''},${input.label || ''},${input.accent || 'violet'},${status},${input.teaser || ''},${max[0].n}) RETURNING id,slug`;
   return rows[0];
 }
@@ -145,13 +169,17 @@ export async function saveChapter(input) {
   const wordCount=blocks.reduce((n,b)=>n+String(b.text || '').trim().split(/\s+/).filter(Boolean).length,0);
   const readMinutes=Math.max(1,Math.ceil(wordCount/220));
   if (input.id) {
-    const rows=await q`UPDATE chapters SET title=${input.title},slug=${slugify(input.slug || input.title)},type=${input.type || 'Chapter'},excerpt=${input.excerpt || ''},status=${status},content=${JSON.stringify(blocks)}::jsonb,read_minutes=${readMinutes},updated_at=NOW() WHERE id=${input.id} RETURNING id,slug`;
+    const rows=await q`UPDATE chapters SET title=${input.title},slug=${slugify(input.slug || input.title)},type=${input.type || 'Chapter'},excerpt=${input.excerpt || ''},status=${status},content=${JSON.stringify(blocks)}::jsonb,read_minutes=${readMinutes},updated_at=NOW() WHERE id=${input.id} AND deleted_at IS NULL RETURNING id,slug`;
     return rows[0];
   }
-  const max=await q`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM chapters WHERE book_id=${input.bookId}`;
+  const max=await q`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM chapters WHERE book_id=${input.bookId} AND deleted_at IS NULL`;
   const rows=await q`INSERT INTO chapters(book_id,title,slug,type,excerpt,status,content,read_minutes,sort_order) VALUES(${input.bookId},${input.title},${slugify(input.slug || input.title)},${input.type || 'Chapter'},${input.excerpt || ''},${status},${JSON.stringify(blocks)}::jsonb,${readMinutes},${max[0].n}) RETURNING id,slug`;
   return rows[0];
 }
 
-export async function deleteBook(id){ await ensureSchema(); return sql()`DELETE FROM books WHERE id=${id}`; }
-export async function deleteChapter(id){ await ensureSchema(); return sql()`DELETE FROM chapters WHERE id=${id}`; }
+export async function trashBook(id){ await ensureSchema(); const q=sql(); await q`UPDATE books SET deleted_at=NOW(),updated_at=NOW() WHERE id=${id} AND deleted_at IS NULL`; }
+export async function trashChapter(id){ await ensureSchema(); const q=sql(); await q`UPDATE chapters SET deleted_at=NOW(),updated_at=NOW() WHERE id=${id} AND deleted_at IS NULL`; }
+export async function restoreBook(id){ await ensureSchema(); const q=sql(); await q`UPDATE books SET deleted_at=NULL,updated_at=NOW() WHERE id=${id}`; }
+export async function restoreChapter(id){ await ensureSchema(); const q=sql(); await q`UPDATE chapters SET deleted_at=NULL,updated_at=NOW() WHERE id=${id}`; }
+export async function permanentlyDeleteBook(id){ await ensureSchema(); const q=sql(); await q`DELETE FROM books WHERE id=${id} AND deleted_at IS NOT NULL`; }
+export async function permanentlyDeleteChapter(id){ await ensureSchema(); const q=sql(); await q`DELETE FROM chapters WHERE id=${id} AND deleted_at IS NOT NULL`; }
