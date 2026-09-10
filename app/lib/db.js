@@ -28,6 +28,7 @@ async function ensureSchema() {
     accent TEXT NOT NULL DEFAULT 'violet',
     status TEXT NOT NULL DEFAULT 'Draft',
     teaser TEXT NOT NULL DEFAULT '',
+    cover_image TEXT NOT NULL DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -43,6 +44,7 @@ async function ensureSchema() {
     status TEXT NOT NULL DEFAULT 'Draft',
     read_minutes INTEGER NOT NULL DEFAULT 1,
     content JSONB NOT NULL DEFAULT '[]'::jsonb,
+    divider_image TEXT NOT NULL DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -51,6 +53,8 @@ async function ensureSchema() {
   )`;
   await q`ALTER TABLE books ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
   await q`ALTER TABLE chapters ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+  await q`ALTER TABLE books ADD COLUMN IF NOT EXISTS cover_image TEXT NOT NULL DEFAULT ''`;
+  await q`ALTER TABLE chapters ADD COLUMN IF NOT EXISTS divider_image TEXT NOT NULL DEFAULT ''`;
 
   const rows = await q`SELECT COUNT(*)::int AS count FROM books`;
   if ((rows[0]?.count || 0) === 0) {
@@ -79,6 +83,7 @@ function normalizeBook(book, chapters=[]) {
     accent:book.accent || 'violet',
     status:book.status,
     teaser:book.teaser || '',
+    coverImage:book.cover_image || '',
     deletedAt:book.deleted_at || null,
     chapters:chapters.map(c=>({
       id:c.id,
@@ -89,6 +94,7 @@ function normalizeBook(book, chapters=[]) {
       status:c.status,
       read:`${c.read_minutes || 1} min read`,
       readMinutes:c.read_minutes || 1,
+      dividerImage:c.divider_image || '',
       deletedAt:c.deleted_at || null,
       blocks:Array.isArray(c.content) ? c.content : []
     }))
@@ -154,11 +160,11 @@ export async function saveBook(input) {
   await ensureSchema(); const q=sql();
   const status=['Draft','Coming Soon','Published'].includes(input.status) ? input.status : 'Draft';
   if (input.id) {
-    const rows=await q`UPDATE books SET title=${input.title},slug=${slugify(input.slug || input.title)},description=${input.description || ''},label=${input.label || ''},accent=${input.accent || 'violet'},status=${status},teaser=${input.teaser || ''},updated_at=NOW() WHERE id=${input.id} AND deleted_at IS NULL RETURNING id,slug`;
+    const rows=await q`UPDATE books SET title=${input.title},slug=${slugify(input.slug || input.title)},description=${input.description || ''},label=${input.label || ''},accent=${input.accent || 'violet'},status=${status},teaser=${input.teaser || ''},cover_image=${input.coverImage || ''},updated_at=NOW() WHERE id=${input.id} AND deleted_at IS NULL RETURNING id,slug`;
     return rows[0];
   }
   const max=await q`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM books WHERE deleted_at IS NULL`;
-  const rows=await q`INSERT INTO books(title,slug,description,label,accent,status,teaser,sort_order) VALUES(${input.title},${slugify(input.slug || input.title)},${input.description || ''},${input.label || ''},${input.accent || 'violet'},${status},${input.teaser || ''},${max[0].n}) RETURNING id,slug`;
+  const rows=await q`INSERT INTO books(title,slug,description,label,accent,status,teaser,cover_image,sort_order) VALUES(${input.title},${slugify(input.slug || input.title)},${input.description || ''},${input.label || ''},${input.accent || 'violet'},${status},${input.teaser || ''},${input.coverImage || ''},${max[0].n}) RETURNING id,slug`;
   return rows[0];
 }
 
@@ -169,11 +175,11 @@ export async function saveChapter(input) {
   const wordCount=blocks.reduce((n,b)=>n+String(b.text || '').trim().split(/\s+/).filter(Boolean).length,0);
   const readMinutes=Math.max(1,Math.ceil(wordCount/220));
   if (input.id) {
-    const rows=await q`UPDATE chapters SET title=${input.title},slug=${slugify(input.slug || input.title)},type=${input.type || 'Chapter'},excerpt=${input.excerpt || ''},status=${status},content=${JSON.stringify(blocks)}::jsonb,read_minutes=${readMinutes},updated_at=NOW() WHERE id=${input.id} AND deleted_at IS NULL RETURNING id,slug`;
+    const rows=await q`UPDATE chapters SET title=${input.title},slug=${slugify(input.slug || input.title)},type=${input.type || 'Chapter'},excerpt=${input.excerpt || ''},status=${status},content=${JSON.stringify(blocks)}::jsonb,divider_image=${input.dividerImage || ''},read_minutes=${readMinutes},updated_at=NOW() WHERE id=${input.id} AND deleted_at IS NULL RETURNING id,slug`;
     return rows[0];
   }
   const max=await q`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM chapters WHERE book_id=${input.bookId} AND deleted_at IS NULL`;
-  const rows=await q`INSERT INTO chapters(book_id,title,slug,type,excerpt,status,content,read_minutes,sort_order) VALUES(${input.bookId},${input.title},${slugify(input.slug || input.title)},${input.type || 'Chapter'},${input.excerpt || ''},${status},${JSON.stringify(blocks)}::jsonb,${readMinutes},${max[0].n}) RETURNING id,slug`;
+  const rows=await q`INSERT INTO chapters(book_id,title,slug,type,excerpt,status,content,divider_image,read_minutes,sort_order) VALUES(${input.bookId},${input.title},${slugify(input.slug || input.title)},${input.type || 'Chapter'},${input.excerpt || ''},${status},${JSON.stringify(blocks)}::jsonb,${input.dividerImage || ''},${readMinutes},${max[0].n}) RETURNING id,slug`;
   return rows[0];
 }
 
