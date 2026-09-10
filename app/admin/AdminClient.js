@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 
 const EMPTY_BOOK={title:'',slug:'',description:'',label:'',accent:'violet',status:'Draft',teaser:''};
@@ -13,6 +13,11 @@ function StatusPill({status}){
 
 function RichBlock({block,index,onUpdate,onMove,onRemove}){
   const editorRef=useRef(null);
+  const html=block.html || (block.text ? String(block.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>') : '');
+  useEffect(()=>{
+    const editor=editorRef.current;
+    if(editor && editor.innerHTML!==html) editor.innerHTML=html;
+  },[html]);
   const run=(command,value=null)=>{
     const editor=editorRef.current;
     if(!editor)return;
@@ -22,7 +27,6 @@ function RichBlock({block,index,onUpdate,onMove,onRemove}){
   };
   const align=value=>onUpdate(index,{align:value});
   const toolbarButton=(label,title,action,active=false)=><button type="button" className="button" title={title} aria-label={title} onMouseDown={e=>{e.preventDefault();action();}} style={{padding:'6px 9px',minWidth:34,fontWeight:active?700:500,opacity:active?1:.78}}>{label}</button>;
-  const html=block.html || (block.text ? String(block.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>') : '');
   return <div style={{borderBottom:'1px solid rgba(255,255,255,.07)',padding:'10px 0 12px'}}>
     <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:6,flexWrap:'wrap'}}>
       <select value={block.type} onChange={e=>onUpdate(index,{type:e.target.value})} style={{height:34,padding:'4px 8px'}}>{BLOCK_TYPES.map(t=><option key={t} value={t}>{t.replaceAll('_',' ')}</option>)}</select>
@@ -47,14 +51,67 @@ function RichBlock({block,index,onUpdate,onMove,onRemove}){
   </div>;
 }
 
+function cloneBlocks(blocks){ return JSON.parse(JSON.stringify(blocks || [])); }
+
 function BlockEditor({blocks,onChange}){
-  function update(i,patch){ const next=[...blocks]; next[i]={...next[i],...patch}; onChange(next); }
-  function move(i,dir){ const j=i+dir; if(j<0||j>=blocks.length)return; const next=[...blocks]; [next[i],next[j]]=[next[j],next[i]]; onChange(next); }
-  function remove(i){ onChange(blocks.filter((_,x)=>x!==i)); }
-  function add(type='paragraph'){ onChange([...blocks,{type,text:'',html:'',align:'left'}]); }
-  return <div style={{border:'1px solid rgba(255,255,255,.10)',borderRadius:14,padding:'4px 14px 14px',background:'rgba(255,255,255,.018)'}}>
-    {blocks.map((block,i)=><RichBlock key={i} block={block} index={i} onUpdate={update} onMove={move} onRemove={remove}/>)}
-    <div style={{display:'flex',gap:7,flexWrap:'wrap',paddingTop:12}}>{BLOCK_TYPES.map(type=><button key={type} className="button" type="button" onClick={()=>add(type)} style={{padding:'7px 10px'}}>+ {type.replaceAll('_',' ')}</button>)}</div>
+  const pastRef=useRef([]);
+  const futureRef=useRef([]);
+  const [historyVersion,setHistoryVersion]=useState(0);
+  const blocksRef=useRef(blocks);
+  useEffect(()=>{ blocksRef.current=blocks; },[blocks]);
+
+  function commit(next){
+    pastRef.current=[...pastRef.current.slice(-99),cloneBlocks(blocksRef.current)];
+    futureRef.current=[];
+    blocksRef.current=next;
+    onChange(next);
+    setHistoryVersion(v=>v+1);
+  }
+  function update(i,patch){ const next=[...blocksRef.current]; next[i]={...next[i],...patch}; commit(next); }
+  function move(i,dir){ const j=i+dir; if(j<0||j>=blocksRef.current.length)return; const next=[...blocksRef.current]; [next[i],next[j]]=[next[j],next[i]]; commit(next); }
+  function remove(i){ commit(blocksRef.current.filter((_,x)=>x!==i)); }
+  function add(type='paragraph'){ commit([...blocksRef.current,{type,text:'',html:'',align:'left'}]); }
+  function undo(){
+    const previous=pastRef.current.pop();
+    if(!previous)return;
+    futureRef.current=[cloneBlocks(blocksRef.current),...futureRef.current].slice(0,100);
+    blocksRef.current=previous;
+    onChange(previous);
+    setHistoryVersion(v=>v+1);
+  }
+  function redo(){
+    const next=futureRef.current.shift();
+    if(!next)return;
+    pastRef.current=[...pastRef.current.slice(-99),cloneBlocks(blocksRef.current)];
+    blocksRef.current=next;
+    onChange(next);
+    setHistoryVersion(v=>v+1);
+  }
+
+  useEffect(()=>{
+    const handleKeyDown=e=>{
+      const modifier=e.ctrlKey||e.metaKey;
+      if(!modifier||e.key.toLowerCase()!=='z')return;
+      e.preventDefault();
+      if(e.shiftKey) redo(); else undo();
+    };
+    window.addEventListener('keydown',handleKeyDown);
+    return()=>window.removeEventListener('keydown',handleKeyDown);
+  });
+
+  const canUndo=pastRef.current.length>0;
+  const canRedo=futureRef.current.length>0;
+  void historyVersion;
+  return <div>
+    <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:8,flexWrap:'wrap'}}>
+      <button className="button" type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl/Cmd + Z)">↶ Undo</button>
+      <button className="button" type="button" onClick={redo} disabled={!canRedo} title="Redo (Ctrl/Cmd + Shift + Z)">↷ Redo</button>
+      <span className="muted" style={{fontSize:12}}>Up to 100 recent editing steps</span>
+    </div>
+    <div style={{border:'1px solid rgba(255,255,255,.10)',borderRadius:14,padding:'4px 14px 14px',background:'rgba(255,255,255,.018)'}}>
+      {blocks.map((block,i)=><RichBlock key={i} block={block} index={i} onUpdate={update} onMove={move} onRemove={remove}/>)}
+      <div style={{display:'flex',gap:7,flexWrap:'wrap',paddingTop:12}}>{BLOCK_TYPES.map(type=><button key={type} className="button" type="button" onClick={()=>add(type)} style={{padding:'7px 10px'}}>+ {type.replaceAll('_',' ')}</button>)}</div>
+    </div>
   </div>;
 }
 
@@ -65,7 +122,7 @@ function ChapterEditor({book,chapter,onBack,onSaved,onTrash,api}){
   return <section className="admin-card">
     <button className="button" onClick={onBack}>← Back to {book.title}</button>
     <div style={{marginTop:20,display:'grid',gap:14}}>
-      <div><div className="eyebrow">Chapter editor</div><h2 style={{marginBottom:4}}>{chapter?'Edit chapter':'New chapter'}</h2><p className="muted" style={{margin:0}}>Select text inside a block, then use the formatting controls above it.</p></div>
+      <div><div className="eyebrow">Chapter editor</div><h2 style={{marginBottom:4}}>{chapter?'Edit chapter':'New chapter'}</h2><p className="muted" style={{margin:0}}>Select text inside a block, then use the formatting controls above it. Undo/Redo also works with Ctrl/Cmd + Z.</p></div>
       <div className="admin-grid">
         <div className="field"><label>Title</label><input value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></div>
         <div className="field"><label>Slug</label><input value={form.slug || ''} onChange={e=>setForm({...form,slug:e.target.value})} placeholder="auto-generated if empty"/></div>
