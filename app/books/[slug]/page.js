@@ -11,7 +11,7 @@ export default async function BookPage({ params }) {
 
   return (
     <main>
-      <header className="site-header"><div className="shell site-header-inner"><Link className="wordmark" href="/">DAVID//WRITES</Link><nav className="nav"><Link href="/">Home</Link><Link href="/admin">Admin</Link></nav></div></header>
+      <header className="site-header"><div className="shell site-header-inner"><Link className="wordmark" href="/">DAVID//WRITES</Link><nav className="nav"><Link href="/">Home</Link></nav></div></header>
       <section className="book-hero shell"><div className="label">{book.label || (book.status==='Coming Soon'?'COMING SOON':'BOOK')}</div><h1>{book.title}</h1><p>{book.description}</p>{book.status==='Coming Soon'?<div className="notice" style={{marginTop:24}}><strong>Coming Soon</strong><br/>{book.teaser || 'This book is still taking shape. Check back for its first published chapter.'}</div>:null}</section>
       <section className="shell chapter-list">
         {book.chapters.length ? book.chapters.map((chapter,index)=> chapter.status==='Coming Soon' ? (
