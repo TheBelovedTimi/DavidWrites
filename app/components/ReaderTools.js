@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-export default function ReaderTools({chapterId,readMinutes,title}){
+export default function ReaderTools({chapterId,readMinutes,title,bookTitle,chapterTitle,bookSlug,chapterSlug}){
   const [theme,setTheme]=useState('dark');
   const [fontSize,setFontSize]=useState(18);
   const [progress,setProgress]=useState(0);
@@ -12,7 +12,10 @@ export default function ReaderTools({chapterId,readMinutes,title}){
     const savedTheme=localStorage.getItem('dw_reader_theme') || 'dark';
     const savedSize=Number(localStorage.getItem('dw_reader_size') || 18);
     setTheme(savedTheme); setFontSize(savedSize);
-  },[]);
+    if(bookSlug&&chapterSlug){
+      try{localStorage.setItem('dw_continue_reading',JSON.stringify({bookTitle,chapterTitle,url:`/books/${bookSlug}/${chapterSlug}`,savedAt:Date.now()}));}catch{}
+    }
+  },[bookSlug,chapterSlug,bookTitle,chapterTitle]);
 
   useEffect(()=>{
     document.documentElement.dataset.readerTheme=theme;
