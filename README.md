@@ -8,23 +8,25 @@ Personal fiction website for David Writes, built with Next.js App Router and des
 - Dynamic book and chapter routes
 - Book-style reader with progress indicator and previous/next navigation
 - Password-protected `/admin`
-- Notion source saved in the browser
-- Authenticated `/api/notion/sync` endpoint
-- Current Notion API (`2026-03-11`) with page, data source, and database support
-- No redirect is used by the sync flow, avoiding the previous `NEXT_REDIRECT` error
+- Built-in book and chapter CMS
+- Draft, Coming Soon, and Published states
+- Persistent Neon/Postgres storage via `DATABASE_URL`
+- Optional Notion import/sync support
+- Current Notion API (`2026-03-11`)
 
 ## Environment variables
 
 Set these in Vercel:
 
 - `ADMIN_PASSWORD` — private admin password
-- `API_KEY` — Notion integration secret
+- `DATABASE_URL` — Neon/Postgres connection URL
+- `API_KEY` — optional Notion integration secret
 
 Never commit the actual values to GitHub.
 
-## Notion setup
+## Publishing workflow
 
-Share the Notion page/database with your Notion integration, sign in to `/admin`, paste the Notion page/database URL or ID, save it, then press **Sync Notion**.
+Use `/admin` to create and edit books and chapters. Draft content stays private, Coming Soon content can be announced publicly without exposing the chapter body, and Published content is readable on the public site.
 
 ## Development
 
