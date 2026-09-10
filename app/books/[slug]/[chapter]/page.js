@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getChapter } from '../../../data';
+import { getChapterBySlug } from '../../../lib/db';
 import ReaderProgress from '../../../components/ReaderProgress';
+
+export const dynamic='force-dynamic';
 
 function Block({ block }) {
   if (!block) return null;
@@ -18,34 +20,18 @@ function Block({ block }) {
 }
 
 function Nav({ book, index, bottom = false }) {
-  const prev = index > 0 ? book.chapters[index - 1] : null;
-  const next = index < book.chapters.length - 1 ? book.chapters[index + 1] : null;
-  return <div className={`reader-nav ${bottom ? 'bottom' : ''}`}>
-    <span>{prev ? <Link href={`/books/${book.slug}/${prev.slug}`}>← {prev.title}</Link> : <Link href={`/books/${book.slug}`}>← Book</Link>}</span>
-    <span>{next ? <Link href={`/books/${book.slug}/${next.slug}`}>{next.title} →</Link> : <Link href={`/books/${book.slug}`}>Book →</Link>}</span>
-  </div>;
+  const readable=book.chapters.filter(c=>c.status==='Published');
+  const chapter=readable[index];
+  const prev = index > 0 ? readable[index - 1] : null;
+  const next = index < readable.length - 1 ? readable[index + 1] : null;
+  return <div className={`reader-nav ${bottom ? 'bottom' : ''}`}><span>{prev ? <Link href={`/books/${book.slug}/${prev.slug}`}>← {prev.title}</Link> : <Link href={`/books/${book.slug}`}>← Book</Link>}</span><span>{next ? <Link href={`/books/${book.slug}/${next.slug}`}>{next.title} →</Link> : chapter ? <Link href={`/books/${book.slug}`}>Book →</Link> : null}</span></div>;
 }
 
 export default async function ChapterPage({ params }) {
   const { slug, chapter: chapterSlug } = await params;
-  const { book, chapter } = getChapter(slug, chapterSlug);
-  if (!book || !chapter) notFound();
-  const index = book.chapters.findIndex((item) => item.slug === chapter.slug);
-  return <main>
-    <header className="reader-header">
-      <div className="shell reader-head-inner">
-        <Link aria-label="Home" href="/">⌂</Link>
-        <Link className="reader-book" href={`/books/${book.slug}`}>{book.title}</Link>
-        <span aria-hidden="true">✦</span>
-        <ReaderProgress />
-      </div>
-    </header>
-    <article className="reader-wrap">
-      <Nav book={book} index={index} />
-      <h1 className="reader-title">{chapter.title}</h1>
-      <div className="reader-meta">{book.title} · {chapter.type} · {chapter.read}</div>
-      <div className="prose">{chapter.blocks.map((block, i) => <Block key={i} block={block} />)}</div>
-      <Nav book={book} index={index} bottom />
-    </article>
-  </main>;
+  const { book, chapter } = await getChapterBySlug(slug, chapterSlug);
+  if (!book || !chapter || chapter.status !== 'Published') notFound();
+  const readable=book.chapters.filter(c=>c.status==='Published');
+  const index=readable.findIndex(item=>item.slug===chapter.slug);
+  return <main><header className="reader-header"><div className="shell reader-head-inner"><Link aria-label="Home" href="/">⌂</Link><Link className="reader-book" href={`/books/${book.slug}`}>{book.title}</Link><span aria-hidden="true">✦</span><ReaderProgress /></div></header><article className="reader-wrap"><Nav book={book} index={index}/><h1 className="reader-title">{chapter.title}</h1><div className="reader-meta">{book.title} · {chapter.type} · {chapter.read}</div><div className="prose">{chapter.blocks.map((block,i)=><Block key={i} block={block}/>)}</div><Nav book={book} index={index} bottom/></article></main>;
 }
