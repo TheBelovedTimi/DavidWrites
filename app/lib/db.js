@@ -2,97 +2,31 @@ import { neon } from '@neondatabase/serverless';
 import { books as seedBooks } from '../data';
 
 let bootstrapped = false;
-
 export function hasDatabase() { return Boolean(process.env.DATABASE_URL); }
 function sql() { if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is not configured.'); return neon(process.env.DATABASE_URL); }
 function slugify(value='') { return value.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || `untitled-${Date.now()}`; }
-
 async function ensureSchema() {
-  if (bootstrapped || !hasDatabase()) return;
-  const q = sql();
-  await q`CREATE TABLE IF NOT EXISTS books (
-    id BIGSERIAL PRIMARY KEY,title TEXT NOT NULL,slug TEXT UNIQUE NOT NULL,description TEXT NOT NULL DEFAULT '',label TEXT NOT NULL DEFAULT '',accent TEXT NOT NULL DEFAULT 'violet',status TEXT NOT NULL DEFAULT 'Draft',teaser TEXT NOT NULL DEFAULT '',cover_image TEXT NOT NULL DEFAULT '',sort_order INTEGER NOT NULL DEFAULT 0,deleted_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`;
-  await q`CREATE TABLE IF NOT EXISTS chapters (
-    id BIGSERIAL PRIMARY KEY,book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE CASCADE,title TEXT NOT NULL,slug TEXT NOT NULL,type TEXT NOT NULL DEFAULT 'Chapter',excerpt TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'Draft',read_minutes INTEGER NOT NULL DEFAULT 1,view_count BIGINT NOT NULL DEFAULT 0,content JSONB NOT NULL DEFAULT '[]'::jsonb,divider_image TEXT NOT NULL DEFAULT '',sort_order INTEGER NOT NULL DEFAULT 0,deleted_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(book_id, slug)
-  )`;
-  await q`ALTER TABLE books ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
-  await q`ALTER TABLE chapters ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
-  await q`ALTER TABLE books ADD COLUMN IF NOT EXISTS cover_image TEXT NOT NULL DEFAULT ''`;
-  await q`ALTER TABLE chapters ADD COLUMN IF NOT EXISTS divider_image TEXT NOT NULL DEFAULT ''`;
-  await q`ALTER TABLE chapters ADD COLUMN IF NOT EXISTS view_count BIGINT NOT NULL DEFAULT 0`;
-
+  if (bootstrapped || !hasDatabase()) return; const q = sql();
+  await q`CREATE TABLE IF NOT EXISTS books (id BIGSERIAL PRIMARY KEY,title TEXT NOT NULL,slug TEXT UNIQUE NOT NULL,description TEXT NOT NULL DEFAULT '',label TEXT NOT NULL DEFAULT '',accent TEXT NOT NULL DEFAULT 'violet',status TEXT NOT NULL DEFAULT 'Draft',teaser TEXT NOT NULL DEFAULT '',cover_image TEXT NOT NULL DEFAULT '',sort_order INTEGER NOT NULL DEFAULT 0,deleted_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
+  await q`CREATE TABLE IF NOT EXISTS chapters (id BIGSERIAL PRIMARY KEY,book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE CASCADE,title TEXT NOT NULL,slug TEXT NOT NULL,type TEXT NOT NULL DEFAULT 'Chapter',excerpt TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'Draft',read_minutes INTEGER NOT NULL DEFAULT 1,view_count BIGINT NOT NULL DEFAULT 0,content JSONB NOT NULL DEFAULT '[]'::jsonb,divider_image TEXT NOT NULL DEFAULT '',sort_order INTEGER NOT NULL DEFAULT 0,deleted_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(book_id, slug))`;
+  await q`ALTER TABLE books ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`; await q`ALTER TABLE chapters ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`; await q`ALTER TABLE books ADD COLUMN IF NOT EXISTS cover_image TEXT NOT NULL DEFAULT ''`; await q`ALTER TABLE chapters ADD COLUMN IF NOT EXISTS divider_image TEXT NOT NULL DEFAULT ''`; await q`ALTER TABLE chapters ADD COLUMN IF NOT EXISTS view_count BIGINT NOT NULL DEFAULT 0`;
   const rows = await q`SELECT COUNT(*)::int AS count FROM books`;
-  if ((rows[0]?.count || 0) === 0) {
-    for (let b=0; b<seedBooks.length; b++) {
-      const book = seedBooks[b];
-      const inserted = await q`INSERT INTO books (title,slug,description,label,accent,status,sort_order) VALUES (${book.title},${book.slug},${book.description || ''},${book.label || ''},${book.accent || 'violet'},${book.status === 'Ongoing' ? 'Published' : book.status === 'In Development' ? 'Coming Soon' : book.status || 'Draft'},${b}) RETURNING id`;
-      const bookId = inserted[0].id;
-      for (let c=0; c<(book.chapters || []).length; c++) {
-        const ch = book.chapters[c];
-        await q`INSERT INTO chapters (book_id,title,slug,type,status,read_minutes,content,sort_order) VALUES (${bookId},${ch.title},${ch.slug},${ch.type || 'Chapter'},${ch.status || 'Draft'},${parseInt(ch.read) || 1},${JSON.stringify(ch.blocks || [])}::jsonb,${c})`;
-      }
-    }
-  }
-  bootstrapped = true;
+  if ((rows[0]?.count || 0) === 0) { for (let b=0;b<seedBooks.length;b++){const book=seedBooks[b];const inserted=await q`INSERT INTO books (title,slug,description,label,accent,status,sort_order) VALUES (${book.title},${book.slug},${book.description || ''},${book.label || ''},${book.accent || 'violet'},${book.status === 'Ongoing' ? 'Published' : book.status === 'In Development' ? 'Coming Soon' : book.status || 'Draft'},${b}) RETURNING id`;const bookId=inserted[0].id;for(let c=0;c<(book.chapters||[]).length;c++){const ch=book.chapters[c];await q`INSERT INTO chapters (book_id,title,slug,type,status,read_minutes,content,sort_order) VALUES (${bookId},${ch.title},${ch.slug},${ch.type || 'Chapter'},${ch.status || 'Draft'},${parseInt(ch.read) || 1},${JSON.stringify(ch.blocks || [])}::jsonb,${c})`;}} }
+  bootstrapped=true;
 }
-
-function normalizeBook(book, chapters=[]) {
-  return {id:book.id,title:book.title,slug:book.slug,description:book.description || '',label:book.label || '',accent:book.accent || 'violet',status:book.status,teaser:book.teaser || '',coverImage:book.cover_image || '',deletedAt:book.deleted_at || null,chapters:chapters.map(c=>({id:c.id,title:c.title,slug:c.slug,type:c.type || 'Chapter',excerpt:c.excerpt || '',status:c.status,read:`${c.read_minutes || 1} min read`,readMinutes:c.read_minutes || 1,viewCount:Number(c.view_count || 0),dividerImage:c.divider_image || '',deletedAt:c.deleted_at || null,blocks:Array.isArray(c.content) ? c.content : []}))};
-}
-
-export async function listBooks({ admin=false }={}) {
-  if (!hasDatabase()) return seedBooks;
-  await ensureSchema(); const q = sql();
-  const books = admin ? await q`SELECT * FROM books WHERE deleted_at IS NULL ORDER BY sort_order,id` : await q`SELECT * FROM books WHERE deleted_at IS NULL AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;
-  const result = [];
-  for (const book of books) {
-    const chapters = admin ? await q`SELECT * FROM chapters WHERE book_id=${book.id} AND deleted_at IS NULL ORDER BY sort_order,id` : await q`SELECT * FROM chapters WHERE book_id=${book.id} AND deleted_at IS NULL AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;
-    result.push(normalizeBook(book, chapters));
-  }
-  return result;
-}
-
-export async function listTrash() {
-  await ensureSchema(); const q=sql();
-  const bookRows=await q`SELECT * FROM books WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`; const books=[];
-  for (const book of bookRows) { const chapters=await q`SELECT * FROM chapters WHERE book_id=${book.id} ORDER BY sort_order,id`; books.push(normalizeBook(book,chapters)); }
-  const chapterRows=await q`SELECT c.*, b.title AS book_title, b.slug AS book_slug FROM chapters c JOIN books b ON b.id=c.book_id WHERE c.deleted_at IS NOT NULL AND b.deleted_at IS NULL ORDER BY c.deleted_at DESC`;
-  const chapters=chapterRows.map(c=>({id:c.id,title:c.title,slug:c.slug,type:c.type || 'Chapter',status:c.status,deletedAt:c.deleted_at,bookId:c.book_id,bookTitle:c.book_title,bookSlug:c.book_slug}));
-  return {books,chapters};
-}
-
-export async function getBookBySlug(slug,{admin=false}={}) {
-  if (!hasDatabase()) return seedBooks.find(b=>b.slug===slug) || null;
-  await ensureSchema(); const q=sql();
-  const rows = admin ? await q`SELECT * FROM books WHERE slug=${slug} AND deleted_at IS NULL LIMIT 1` : await q`SELECT * FROM books WHERE slug=${slug} AND deleted_at IS NULL AND status IN ('Published','Coming Soon') LIMIT 1`;
-  if (!rows[0]) return null;
-  const chapters = admin ? await q`SELECT * FROM chapters WHERE book_id=${rows[0].id} AND deleted_at IS NULL ORDER BY sort_order,id` : await q`SELECT * FROM chapters WHERE book_id=${rows[0].id} AND deleted_at IS NULL AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;
-  return normalizeBook(rows[0], chapters);
-}
-export async function getChapterBySlug(bookSlug, chapterSlug,{admin=false}={}) { const book=await getBookBySlug(bookSlug,{admin}); if (!book) return {book:null,chapter:null}; return {book,chapter:(book.chapters || []).find(c=>c.slug===chapterSlug) || null}; }
-
-export async function saveBook(input) {
-  await ensureSchema(); const q=sql(); const status=['Draft','Coming Soon','Published'].includes(input.status) ? input.status : 'Draft';
-  if (input.id) { const rows=await q`UPDATE books SET title=${input.title},slug=${slugify(input.slug || input.title)},description=${input.description || ''},label=${input.label || ''},accent=${input.accent || 'violet'},status=${status},teaser=${input.teaser || ''},cover_image=${input.coverImage || ''},updated_at=NOW() WHERE id=${input.id} AND deleted_at IS NULL RETURNING id,slug`; return rows[0]; }
-  const max=await q`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM books WHERE deleted_at IS NULL`;
-  const rows=await q`INSERT INTO books(title,slug,description,label,accent,status,teaser,cover_image,sort_order) VALUES(${input.title},${slugify(input.slug || input.title)},${input.description || ''},${input.label || ''},${input.accent || 'violet'},${status},${input.teaser || ''},${input.coverImage || ''},${max[0].n}) RETURNING id,slug`; return rows[0];
-}
-
-export async function saveChapter(input) {
-  await ensureSchema(); const q=sql(); const status=['Draft','Coming Soon','Published'].includes(input.status) ? input.status : 'Draft'; const blocks=Array.isArray(input.blocks) ? input.blocks : [];
-  const wordCount=blocks.reduce((n,b)=>n+String(b.text || '').trim().split(/\s+/).filter(Boolean).length,0); const readMinutes=Math.max(1,Math.ceil(wordCount/220));
-  if (input.id) { const rows=await q`UPDATE chapters SET title=${input.title},slug=${slugify(input.slug || input.title)},type=${input.type || 'Chapter'},excerpt=${input.excerpt || ''},status=${status},content=${JSON.stringify(blocks)}::jsonb,divider_image=${input.dividerImage || ''},read_minutes=${readMinutes},updated_at=NOW() WHERE id=${input.id} AND deleted_at IS NULL RETURNING id,slug`; return rows[0]; }
-  const max=await q`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM chapters WHERE book_id=${input.bookId} AND deleted_at IS NULL`;
-  const rows=await q`INSERT INTO chapters(book_id,title,slug,type,excerpt,status,content,divider_image,read_minutes,sort_order) VALUES(${input.bookId},${input.title},${slugify(input.slug || input.title)},${input.type || 'Chapter'},${input.excerpt || ''},${status},${JSON.stringify(blocks)}::jsonb,${input.dividerImage || ''},${readMinutes},${max[0].n}) RETURNING id,slug`; return rows[0];
-}
-
-export async function incrementChapterView(id){ if(!hasDatabase() || !id) return; await ensureSchema(); const q=sql(); await q`UPDATE chapters SET view_count=view_count+1 WHERE id=${id} AND deleted_at IS NULL AND status='Published'`; }
-export async function getAnalytics(){ if(!hasDatabase()) return {totalViews:0,topChapters:[]}; await ensureSchema(); const q=sql(); const totals=await q`SELECT COALESCE(SUM(view_count),0)::bigint AS total FROM chapters WHERE deleted_at IS NULL`; const top=await q`SELECT c.id,c.title,c.slug,c.view_count,b.title AS book_title,b.slug AS book_slug FROM chapters c JOIN books b ON b.id=c.book_id WHERE c.deleted_at IS NULL ORDER BY c.view_count DESC,c.id DESC LIMIT 8`; return {totalViews:Number(totals[0]?.total || 0),topChapters:top.map(r=>({id:r.id,title:r.title,slug:r.slug,views:Number(r.view_count||0),bookTitle:r.book_title,bookSlug:r.book_slug}))}; }
-
-export async function trashBook(id){ await ensureSchema(); const q=sql(); await q`UPDATE books SET deleted_at=NOW(),updated_at=NOW() WHERE id=${id} AND deleted_at IS NULL`; }
-export async function trashChapter(id){ await ensureSchema(); const q=sql(); await q`UPDATE chapters SET deleted_at=NOW(),updated_at=NOW() WHERE id=${id} AND deleted_at IS NULL`; }
-export async function restoreBook(id){ await ensureSchema(); const q=sql(); await q`UPDATE books SET deleted_at=NULL,updated_at=NOW() WHERE id=${id}`; }
-export async function restoreChapter(id){ await ensureSchema(); const q=sql(); await q`UPDATE chapters SET deleted_at=NULL,updated_at=NOW() WHERE id=${id}`; }
-export async function permanentlyDeleteBook(id){ await ensureSchema(); const q=sql(); await q`DELETE FROM books WHERE id=${id} AND deleted_at IS NOT NULL`; }
-export async function permanentlyDeleteChapter(id){ await ensureSchema(); const q=sql(); await q`DELETE FROM chapters WHERE id=${id} AND deleted_at IS NOT NULL`; }
+function normalizeBook(book,chapters=[]){return{id:book.id,title:book.title,slug:book.slug,description:book.description||'',label:book.label||'',accent:book.accent||'violet',status:book.status,teaser:book.teaser||'',coverImage:book.cover_image||'',deletedAt:book.deleted_at||null,chapters:chapters.map(c=>({id:c.id,title:c.title,slug:c.slug,type:c.type||'Chapter',excerpt:c.excerpt||'',status:c.status,read:`${c.read_minutes||1} min read`,readMinutes:c.read_minutes||1,viewCount:Number(c.view_count||0),dividerImage:c.divider_image||'',deletedAt:c.deleted_at||null,blocks:Array.isArray(c.content)?c.content:[]}))};}
+export async function listBooks({admin=false}={}){if(!hasDatabase())return seedBooks;await ensureSchema();const q=sql();const books=admin?await q`SELECT * FROM books WHERE deleted_at IS NULL ORDER BY sort_order,id`:await q`SELECT * FROM books WHERE deleted_at IS NULL AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;const result=[];for(const book of books){const chapters=admin?await q`SELECT * FROM chapters WHERE book_id=${book.id} AND deleted_at IS NULL ORDER BY sort_order,id`:await q`SELECT * FROM chapters WHERE book_id=${book.id} AND deleted_at IS NULL AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;result.push(normalizeBook(book,chapters));}return result;}
+export async function listTrash(){await ensureSchema();const q=sql();const bookRows=await q`SELECT * FROM books WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`;const books=[];for(const book of bookRows){const chapters=await q`SELECT * FROM chapters WHERE book_id=${book.id} ORDER BY sort_order,id`;books.push(normalizeBook(book,chapters));}const chapterRows=await q`SELECT c.*,b.title AS book_title,b.slug AS book_slug FROM chapters c JOIN books b ON b.id=c.book_id WHERE c.deleted_at IS NOT NULL AND b.deleted_at IS NULL ORDER BY c.deleted_at DESC`;return{books,chapters:chapterRows.map(c=>({id:c.id,title:c.title,slug:c.slug,type:c.type||'Chapter',status:c.status,deletedAt:c.deleted_at,bookId:c.book_id,bookTitle:c.book_title,bookSlug:c.book_slug}))};}
+export async function getBookBySlug(slug,{admin=false}={}){if(!hasDatabase())return seedBooks.find(b=>b.slug===slug)||null;await ensureSchema();const q=sql();const rows=admin?await q`SELECT * FROM books WHERE slug=${slug} AND deleted_at IS NULL LIMIT 1`:await q`SELECT * FROM books WHERE slug=${slug} AND deleted_at IS NULL AND status IN ('Published','Coming Soon') LIMIT 1`;if(!rows[0])return null;const chapters=admin?await q`SELECT * FROM chapters WHERE book_id=${rows[0].id} AND deleted_at IS NULL ORDER BY sort_order,id`:await q`SELECT * FROM chapters WHERE book_id=${rows[0].id} AND deleted_at IS NULL AND status IN ('Published','Coming Soon') ORDER BY sort_order,id`;return normalizeBook(rows[0],chapters);}
+export async function getChapterBySlug(bookSlug,chapterSlug,{admin=false}={}){const book=await getBookBySlug(bookSlug,{admin});if(!book)return{book:null,chapter:null};return{book,chapter:(book.chapters||[]).find(c=>c.slug===chapterSlug)||null};}
+export async function saveBook(input){await ensureSchema();const q=sql();const status=['Draft','Coming Soon','Published'].includes(input.status)?input.status:'Draft';if(input.id){const rows=await q`UPDATE books SET title=${input.title},slug=${slugify(input.slug||input.title)},description=${input.description||''},label=${input.label||''},accent=${input.accent||'violet'},status=${status},teaser=${input.teaser||''},cover_image=${input.coverImage||''},updated_at=NOW() WHERE id=${input.id} AND deleted_at IS NULL RETURNING id,slug`;return rows[0];}const max=await q`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM books WHERE deleted_at IS NULL`;const rows=await q`INSERT INTO books(title,slug,description,label,accent,status,teaser,cover_image,sort_order) VALUES(${input.title},${slugify(input.slug||input.title)},${input.description||''},${input.label||''},${input.accent||'violet'},${status},${input.teaser||''},${input.coverImage||''},${max[0].n}) RETURNING id,slug`;return rows[0];}
+export async function saveChapter(input){await ensureSchema();const q=sql();const status=['Draft','Coming Soon','Published'].includes(input.status)?input.status:'Draft';const blocks=Array.isArray(input.blocks)?input.blocks:[];const wordCount=blocks.reduce((n,b)=>n+String(b.text||'').trim().split(/\s+/).filter(Boolean).length,0);const readMinutes=Math.max(1,Math.ceil(wordCount/220));if(input.id){const rows=await q`UPDATE chapters SET title=${input.title},slug=${slugify(input.slug||input.title)},type=${input.type||'Chapter'},excerpt=${input.excerpt||''},status=${status},content=${JSON.stringify(blocks)}::jsonb,divider_image=${input.dividerImage||''},read_minutes=${readMinutes},updated_at=NOW() WHERE id=${input.id} AND deleted_at IS NULL RETURNING id,slug`;return rows[0];}const max=await q`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM chapters WHERE book_id=${input.bookId} AND deleted_at IS NULL`;const rows=await q`INSERT INTO chapters(book_id,title,slug,type,excerpt,status,content,divider_image,read_minutes,sort_order) VALUES(${input.bookId},${input.title},${slugify(input.slug||input.title)},${input.type||'Chapter'},${input.excerpt||''},${status},${JSON.stringify(blocks)}::jsonb,${input.dividerImage||''},${readMinutes},${max[0].n}) RETURNING id,slug`;return rows[0];}
+export async function incrementChapterView(id){if(!hasDatabase()||!id)return;await ensureSchema();const q=sql();await q`UPDATE chapters SET view_count=view_count+1 WHERE id=${id} AND deleted_at IS NULL AND status='Published'`;}
+export async function getAnalytics(){if(!hasDatabase())return{totalViews:0,topChapters:[]};await ensureSchema();const q=sql();const totals=await q`SELECT COALESCE(SUM(view_count),0)::bigint AS total FROM chapters WHERE deleted_at IS NULL`;const top=await q`SELECT c.id,c.title,c.slug,c.view_count,b.title AS book_title,b.slug AS book_slug FROM chapters c JOIN books b ON b.id=c.book_id WHERE c.deleted_at IS NULL ORDER BY c.view_count DESC,c.id DESC LIMIT 8`;return{totalViews:Number(totals[0]?.total||0),topChapters:top.map(r=>({id:r.id,title:r.title,slug:r.slug,views:Number(r.view_count||0),bookTitle:r.book_title,bookSlug:r.book_slug}))};}
+export async function getArtwork(kind,id){if(!hasDatabase()||!id)return'';await ensureSchema();const q=sql();if(kind==='book'){const r=await q`SELECT cover_image AS image FROM books WHERE id=${id} AND deleted_at IS NULL AND status IN ('Published','Coming Soon') LIMIT 1`;return r[0]?.image||'';}if(kind==='chapter'){const r=await q`SELECT divider_image AS image FROM chapters WHERE id=${id} AND deleted_at IS NULL AND status='Published' LIMIT 1`;return r[0]?.image||'';}return'';}
+export async function trashBook(id){await ensureSchema();const q=sql();await q`UPDATE books SET deleted_at=NOW(),updated_at=NOW() WHERE id=${id} AND deleted_at IS NULL`;}
+export async function trashChapter(id){await ensureSchema();const q=sql();await q`UPDATE chapters SET deleted_at=NOW(),updated_at=NOW() WHERE id=${id} AND deleted_at IS NULL`;}
+export async function restoreBook(id){await ensureSchema();const q=sql();await q`UPDATE books SET deleted_at=NULL,updated_at=NOW() WHERE id=${id}`;}
+export async function restoreChapter(id){await ensureSchema();const q=sql();await q`UPDATE chapters SET deleted_at=NULL,updated_at=NOW() WHERE id=${id}`;}
+export async function permanentlyDeleteBook(id){await ensureSchema();const q=sql();await q`DELETE FROM books WHERE id=${id} AND deleted_at IS NOT NULL`;}
+export async function permanentlyDeleteChapter(id){await ensureSchema();const q=sql();await q`DELETE FROM chapters WHERE id=${id} AND deleted_at IS NOT NULL`;}
