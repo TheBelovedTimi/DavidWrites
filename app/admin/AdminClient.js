@@ -1,51 +1,79 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 
 const EMPTY_BOOK={title:'',slug:'',description:'',label:'',accent:'violet',status:'Draft',teaser:''};
-const EMPTY_CHAPTER={title:'',slug:'',type:'Chapter',excerpt:'',status:'Draft',blocks:[{type:'paragraph',text:''}]};
+const EMPTY_CHAPTER={title:'',slug:'',type:'Chapter',excerpt:'',status:'Draft',blocks:[{type:'paragraph',text:'',html:'',align:'left'}]};
 const BLOCK_TYPES=['paragraph','heading_1','heading_2','heading_3','quote','bulleted_list_item','numbered_list_item','divider'];
 
 function StatusPill({status}){
   return <span style={{fontSize:12,padding:'5px 9px',border:'1px solid rgba(255,255,255,.16)',borderRadius:999}}>{status}</span>;
 }
 
+function RichBlock({block,index,onUpdate,onMove,onRemove}){
+  const editorRef=useRef(null);
+  const run=(command,value=null)=>{
+    const editor=editorRef.current;
+    if(!editor)return;
+    editor.focus();
+    document.execCommand(command,false,value);
+    onUpdate(index,{html:editor.innerHTML,text:editor.innerText});
+  };
+  const align=value=>onUpdate(index,{align:value});
+  const toolbarButton=(label,title,action,active=false)=><button type="button" className="button" title={title} aria-label={title} onMouseDown={e=>{e.preventDefault();action();}} style={{padding:'6px 9px',minWidth:34,fontWeight:active?700:500,opacity:active?1:.78}}>{label}</button>;
+  const html=block.html || (block.text ? String(block.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>') : '');
+  return <div style={{borderBottom:'1px solid rgba(255,255,255,.07)',padding:'10px 0 12px'}}>
+    <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:6,flexWrap:'wrap'}}>
+      <select value={block.type} onChange={e=>onUpdate(index,{type:e.target.value})} style={{height:34,padding:'4px 8px'}}>{BLOCK_TYPES.map(t=><option key={t} value={t}>{t.replaceAll('_',' ')}</option>)}</select>
+      {block.type!=='divider'?<>
+        <span style={{width:1,height:22,background:'rgba(255,255,255,.1)',margin:'0 2px'}}/>
+        {toolbarButton('B','Bold',()=>run('bold'))}
+        {toolbarButton('I','Italic',()=>run('italic'))}
+        {toolbarButton('U','Underline',()=>run('underline'))}
+        {toolbarButton('S','Strikethrough',()=>run('strikeThrough'))}
+        <span style={{width:1,height:22,background:'rgba(255,255,255,.1)',margin:'0 2px'}}/>
+        {toolbarButton('L','Align left',()=>align('left'),(block.align||'left')==='left')}
+        {toolbarButton('C','Align center',()=>align('center'),block.align==='center')}
+        {toolbarButton('R','Align right',()=>align('right'),block.align==='right')}
+        {toolbarButton('J','Justify',()=>align('justify'),block.align==='justify')}
+      </>:null}
+      <span style={{flex:1}}/>
+      <button className="button" type="button" onClick={()=>onMove(index,-1)} style={{padding:'6px 9px'}}>↑</button>
+      <button className="button" type="button" onClick={()=>onMove(index,1)} style={{padding:'6px 9px'}}>↓</button>
+      <button className="button" type="button" onClick={()=>onRemove(index)} style={{padding:'6px 9px'}}>Remove</button>
+    </div>
+    {block.type==='divider' ? <div className="ornament" style={{margin:'8px 0'}}>···</div> : <div ref={editorRef} contentEditable suppressContentEditableWarning onInput={e=>onUpdate(index,{html:e.currentTarget.innerHTML,text:e.currentTarget.innerText})} dangerouslySetInnerHTML={{__html:html}} data-placeholder="Start writing…" style={{width:'100%',minHeight:block.type==='paragraph'?54:40,padding:'7px 4px',outline:'none',lineHeight:1.65,fontSize:block.type==='heading_1'?30:block.type==='heading_2'?24:block.type==='heading_3'?19:16,fontWeight:block.type.startsWith('heading_')?700:400,fontStyle:block.type==='quote'?'italic':'normal',textAlign:block.align||'left',whiteSpace:'pre-wrap'}} />}
+  </div>;
+}
+
 function BlockEditor({blocks,onChange}){
   function update(i,patch){ const next=[...blocks]; next[i]={...next[i],...patch}; onChange(next); }
   function move(i,dir){ const j=i+dir; if(j<0||j>=blocks.length)return; const next=[...blocks]; [next[i],next[j]]=[next[j],next[i]]; onChange(next); }
   function remove(i){ onChange(blocks.filter((_,x)=>x!==i)); }
-  function add(type='paragraph'){ onChange([...blocks,{type,text:''}]); }
-  return <div style={{display:'grid',gap:12}}>
-    {blocks.map((block,i)=><div key={i} className="admin-card" style={{padding:14,background:'rgba(255,255,255,.025)'}}>
-      <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:10,flexWrap:'wrap'}}>
-        <select value={block.type} onChange={e=>update(i,{type:e.target.value})}>{BLOCK_TYPES.map(t=><option key={t} value={t}>{t.replaceAll('_',' ')}</option>)}</select>
-        <button className="button" type="button" onClick={()=>move(i,-1)}>↑</button>
-        <button className="button" type="button" onClick={()=>move(i,1)}>↓</button>
-        <button className="button" type="button" onClick={()=>remove(i)}>Remove</button>
-      </div>
-      {block.type==='divider' ? <div className="ornament">···</div> : <textarea rows={block.type==='paragraph'?5:3} value={block.text || ''} onChange={e=>update(i,{text:e.target.value})} placeholder="Start writing…" style={{width:'100%',resize:'vertical'}} />}
-    </div>)}
-    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>{BLOCK_TYPES.map(type=><button key={type} className="button" type="button" onClick={()=>add(type)}>+ {type.replaceAll('_',' ')}</button>)}</div>
+  function add(type='paragraph'){ onChange([...blocks,{type,text:'',html:'',align:'left'}]); }
+  return <div style={{border:'1px solid rgba(255,255,255,.10)',borderRadius:14,padding:'4px 14px 14px',background:'rgba(255,255,255,.018)'}}>
+    {blocks.map((block,i)=><RichBlock key={i} block={block} index={i} onUpdate={update} onMove={move} onRemove={remove}/>)}
+    <div style={{display:'flex',gap:7,flexWrap:'wrap',paddingTop:12}}>{BLOCK_TYPES.map(type=><button key={type} className="button" type="button" onClick={()=>add(type)} style={{padding:'7px 10px'}}>+ {type.replaceAll('_',' ')}</button>)}</div>
   </div>;
 }
 
 function ChapterEditor({book,chapter,onBack,onSaved,onTrash,api}){
-  const [form,setForm]=useState(chapter ? {...chapter,blocks:chapter.blocks || []} : {...EMPTY_CHAPTER,bookId:book.id});
+  const [form,setForm]=useState(chapter ? {...chapter,blocks:(chapter.blocks || []).map(b=>({...b,align:b.align||'left'}))} : {...EMPTY_CHAPTER,bookId:book.id});
   const [busy,setBusy]=useState(false); const [error,setError]=useState('');
   async function save(){ setBusy(true); setError(''); try{ await api('saveChapter',{chapter:{...form,bookId:book.id}}); await onSaved(); }catch(e){setError(e.message)}finally{setBusy(false)} }
   return <section className="admin-card">
     <button className="button" onClick={onBack}>← Back to {book.title}</button>
-    <div style={{marginTop:24,display:'grid',gap:18}}>
-      <div><div className="eyebrow">Chapter editor</div><h2>{chapter?'Edit chapter':'New chapter'}</h2></div>
+    <div style={{marginTop:20,display:'grid',gap:14}}>
+      <div><div className="eyebrow">Chapter editor</div><h2 style={{marginBottom:4}}>{chapter?'Edit chapter':'New chapter'}</h2><p className="muted" style={{margin:0}}>Select text inside a block, then use the formatting controls above it.</p></div>
       <div className="admin-grid">
         <div className="field"><label>Title</label><input value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></div>
         <div className="field"><label>Slug</label><input value={form.slug || ''} onChange={e=>setForm({...form,slug:e.target.value})} placeholder="auto-generated if empty"/></div>
         <div className="field"><label>Type / label</label><input value={form.type || ''} onChange={e=>setForm({...form,type:e.target.value})} placeholder="Episode One"/></div>
         <div className="field"><label>Status</label><select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}><option>Draft</option><option>Coming Soon</option><option>Published</option></select></div>
       </div>
-      <div className="field"><label>Teaser / excerpt</label><textarea rows="3" value={form.excerpt || ''} onChange={e=>setForm({...form,excerpt:e.target.value})} placeholder="Shown when this chapter is Coming Soon."/></div>
-      <div><div className="eyebrow" style={{marginBottom:10}}>Notion-style writing blocks</div><BlockEditor blocks={form.blocks || []} onChange={blocks=>setForm({...form,blocks})}/></div>
+      <div className="field"><label>Teaser / excerpt</label><textarea rows="2" value={form.excerpt || ''} onChange={e=>setForm({...form,excerpt:e.target.value})} placeholder="Shown when this chapter is Coming Soon."/></div>
+      <div><div className="eyebrow" style={{marginBottom:8}}>Writing surface</div><BlockEditor blocks={form.blocks || []} onChange={blocks=>setForm({...form,blocks})}/></div>
       {error?<p className="error">{error}</p>:null}
       <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
         <button className="button primary" onClick={save} disabled={busy}>{busy?'Saving…':'Save chapter'}</button>
