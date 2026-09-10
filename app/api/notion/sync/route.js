@@ -3,14 +3,33 @@ import { isAdmin } from '../../../lib/auth';
 
 const NOTION_VERSION = '2026-03-11';
 
+function dashId(value = '') {
+  const x = value.replace(/-/g, '').toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(x)) return null;
+  return `${x.slice(0,8)}-${x.slice(8,12)}-${x.slice(12,16)}-${x.slice(16,20)}-${x.slice(20)}`;
+}
+
 function normalizeId(source = '') {
   const clean = source.trim();
-  const undashed = clean.match(/[0-9a-fA-F]{32}/g)?.pop();
-  if (undashed) {
-    const x = undashed.toLowerCase();
-    return `${x.slice(0,8)}-${x.slice(8,12)}-${x.slice(12,16)}-${x.slice(16,20)}-${x.slice(20)}`;
+
+  // For Notion URLs, only inspect the pathname. Query params such as ?v=...
+  // are view IDs and must never be mistaken for the database/page ID.
+  try {
+    const url = new URL(clean);
+    const pathname = decodeURIComponent(url.pathname);
+    const undashed = pathname.match(/[0-9a-fA-F]{32}/g)?.pop();
+    if (undashed) return dashId(undashed);
+    const dashed = pathname.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g)?.pop();
+    if (dashed) return dashId(dashed);
+  } catch {
+    // Raw IDs are handled below.
   }
-  return clean.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/)?.[0] || clean;
+
+  const undashed = clean.match(/^[0-9a-fA-F]{32}$/)?.[0];
+  if (undashed) return dashId(undashed);
+  const dashed = clean.match(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)?.[0];
+  if (dashed) return dashId(dashed);
+  return null;
 }
 
 function richText(items = []) {
@@ -78,14 +97,15 @@ async function hydratePage(page, token) {
   };
 }
 
-async function getPage(id, token) {
-  const { response, body } = await notionFetch(`/pages/${id}`, token);
-  return response.ok ? hydratePage(body, token) : null;
+async function tryPage(id, token) {
+  const result = await notionFetch(`/pages/${id}`, token);
+  if (result.response.ok) return { ok: true, value: await hydratePage(result.body, token) };
+  return { ok: false, status: result.response.status, message: result.body?.message || 'Page lookup failed' };
 }
 
 async function queryDataSource(dataSourceId, token) {
   const meta = await notionFetch(`/data_sources/${dataSourceId}`, token);
-  if (!meta.response.ok) return null;
+  if (!meta.response.ok) return { ok: false, status: meta.response.status, message: meta.body?.message || 'Data source lookup failed' };
   let cursor = null;
   const pages = [];
   do {
@@ -101,20 +121,28 @@ async function queryDataSource(dataSourceId, token) {
     }
     cursor = query.body.has_more ? query.body.next_cursor : null;
   } while (cursor && pages.length < 100);
-  return { id: meta.body.id, title: meta.body.name || 'Notion data source', pages };
+  return { ok: true, value: { id: meta.body.id, title: meta.body.name || 'Notion data source', pages } };
 }
 
-async function getDatabase(databaseId, token) {
+async function tryDatabase(databaseId, token) {
   const meta = await notionFetch(`/databases/${databaseId}`, token);
-  if (!meta.response.ok) return null;
+  if (!meta.response.ok) return { ok: false, status: meta.response.status, message: meta.body?.message || 'Database lookup failed' };
   const sources = meta.body.data_sources || [];
   const pages = [];
   for (const source of sources) {
     const result = await queryDataSource(source.id, token);
-    if (result) pages.push(...result.pages);
+    if (result.ok) pages.push(...result.value.pages);
   }
   const databaseTitle = richText(meta.body?.title) || 'Notion database';
-  return { id: meta.body.id, title: databaseTitle, pages, dataSources: sources.map((s) => ({ id: s.id, name: s.name })) };
+  return {
+    ok: true,
+    value: {
+      id: meta.body.id,
+      title: databaseTitle,
+      pages,
+      dataSources: sources.map((s) => ({ id: s.id, name: s.name }))
+    }
+  };
 }
 
 export async function POST(request) {
@@ -125,20 +153,35 @@ export async function POST(request) {
   try {
     const { source } = await request.json();
     if (!source?.trim()) return NextResponse.json({ ok: false, error: 'Paste a Notion page/database URL or ID first.' }, { status: 400 });
-    const id = normalizeId(source);
 
-    const page = await getPage(id, token);
-    if (page) return NextResponse.json({ ok: true, kind: 'page', sourceId: id, page });
+    const id = normalizeId(source);
+    if (!id) {
+      return NextResponse.json({
+        ok: false,
+        error: 'I could not find a valid Notion page/database ID in that value. Paste the full Notion page/database URL or a 32-character Notion ID.'
+      }, { status: 400 });
+    }
+
+    const page = await tryPage(id, token);
+    if (page.ok) return NextResponse.json({ ok: true, kind: 'page', sourceId: id, page: page.value });
 
     const dataSource = await queryDataSource(id, token);
-    if (dataSource) return NextResponse.json({ ok: true, kind: 'database', sourceId: id, database: dataSource });
+    if (dataSource.ok) return NextResponse.json({ ok: true, kind: 'database', sourceId: id, database: dataSource.value });
 
-    const database = await getDatabase(id, token);
-    if (database) return NextResponse.json({ ok: true, kind: 'database', sourceId: id, database });
+    const database = await tryDatabase(id, token);
+    if (database.ok) return NextResponse.json({ ok: true, kind: 'database', sourceId: id, database: database.value });
+
+    const statuses = [page.status, dataSource.status, database.status].filter(Boolean);
+    const messages = [page.message, dataSource.message, database.message].filter(Boolean);
+    const permissionLike = statuses.some((status) => status === 401 || status === 403 || status === 404);
 
     return NextResponse.json({
       ok: false,
-      error: 'Notion could not access that source. Check the URL/ID and make sure the page or database is shared with your integration.'
+      sourceId: id,
+      error: permissionLike
+        ? `Notion rejected this source (${[...new Set(statuses)].join('/')}). The ID parsed from your link is ${id}. Make sure the original page/database — not just a linked view — is shared with the same Notion integration whose token is stored in API_KEY.`
+        : `Notion could not read this source. ${messages[0] || 'Unknown Notion API error.'}`,
+      debug: { statuses, messages }
     }, { status: 404 });
   } catch (error) {
     console.error('Notion sync error', error);
