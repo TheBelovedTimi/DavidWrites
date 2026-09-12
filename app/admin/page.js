@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { isAdmin, signIn, signOut } from '../lib/auth';
 import { hasDatabase, listBooks } from '../lib/db';
 import AdminClient from './AdminClient';
+import EditorCaretFix from './EditorCaretFix';
 
 async function loginAction(formData) {
   'use server';
@@ -40,5 +41,5 @@ export default async function AdminPage({ searchParams }) {
 
   const databaseReady=hasDatabase();
   const books=await listBooks({admin:true});
-  return <AdminClient initialBooks={books} databaseReady={databaseReady} logoutAction={logoutAction} />;
+  return <><EditorCaretFix/><AdminClient initialBooks={books} databaseReady={databaseReady} logoutAction={logoutAction} /></>;
 }
