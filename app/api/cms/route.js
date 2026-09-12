@@ -4,7 +4,7 @@ import { getAnalytics, hasDatabase, listBooks, listTrash, permanentlyDeleteBook,
 
 async function guard() {
   if (!(await isAdmin())) return NextResponse.json({ ok:false,error:'Unauthorized' },{status:401});
-  if (!hasDatabase()) return NextResponse.json({ ok:false,error:'Database is not connected yet. Add DATABASE_URL in Vercel.' },{status:503});
+  if (!hasDatabase()) return NextResponse.json({ ok:false,error:'Database is not connected yet. Add GSS_DATABASE_URL in Vercel.' },{status:503});
   return null;
 }
 
