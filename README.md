@@ -1,32 +1,30 @@
-# David Writes
+# Ghost Stories Society
 
-Personal fiction website for David Writes, built with Next.js App Router and designed for Vercel.
+A dark, elegant fiction platform for Doctor, built with Next.js App Router and designed for Vercel.
 
 ## Features
 
-- Dark editorial library homepage
-- Dynamic book and chapter routes
-- Book-style reader with progress indicator and previous/next navigation
+- Atmospheric story discovery homepage
+- Dynamic story and chapter routes
+- Comfortable reader with progress, appearance controls and chapter navigation
 - Password-protected `/admin`
-- Built-in book and chapter CMS
+- Built-in story and chapter CMS
 - Draft, Coming Soon, and Published states
-- Persistent Neon/Postgres storage via `DATABASE_URL`
-- Optional Notion import/sync support
-- Current Notion API (`2026-03-11`)
+- Persistent Neon/Postgres storage via `GSS_DATABASE_URL`
+- Reading analytics, Continue Reading, search and genre filtering
 
 ## Environment variables
 
-Set these in Vercel:
+Set these in the Ghost Stories Society Vercel project:
 
 - `ADMIN_PASSWORD` — private admin password
-- `DATABASE_URL` — Neon/Postgres connection URL
-- `API_KEY` — optional Notion integration secret
+- `GSS_DATABASE_URL` — Ghost Stories Society Neon/Postgres connection URL
 
 Never commit the actual values to GitHub.
 
 ## Publishing workflow
 
-Use `/admin` to create and edit books and chapters. Draft content stays private, Coming Soon content can be announced publicly without exposing the chapter body, and Published content is readable on the public site.
+Use `/admin` to create and edit stories and chapters. Draft content stays private, Coming Soon stories can be announced publicly without exposing unpublished chapter bodies, and Published content is readable on the public site.
 
 ## Development
 
