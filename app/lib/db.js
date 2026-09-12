@@ -2,8 +2,9 @@ import { neon } from '@neondatabase/serverless';
 import { books as seedBooks } from '../data';
 
 let bootstrapped = false;
-export function hasDatabase() { return Boolean(process.env.GSS_DATABASE_URL); }
-function sql() { if (!process.env.GSS_DATABASE_URL) throw new Error('GSS_DATABASE_URL is not configured.'); return neon(process.env.GSS_DATABASE_URL); }
+function databaseUrl() { return process.env.GSS_DATABASE_URL || process.env.GSS_DATABASE_DATABASE_URL || process.env.GSS_DATABASE_POSTGRES_URL || ''; }
+export function hasDatabase() { return Boolean(databaseUrl()); }
+function sql() { const url=databaseUrl(); if (!url) throw new Error('Ghost Stories Society database is not configured.'); return neon(url); }
 function slugify(value='') { return value.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || `untitled-${Date.now()}`; }
 async function ensureSchema() {
   if (bootstrapped || !hasDatabase()) return; const q = sql();
