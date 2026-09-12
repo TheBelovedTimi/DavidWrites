@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isAdmin } from '../../lib/auth';
 import { getAnalytics, hasDatabase, listBooks, listTrash, permanentlyDeleteBook, permanentlyDeleteChapter, restoreBook, restoreChapter, saveBook, saveChapter, trashBook, trashChapter } from '../../lib/db';
+import { getPublicationStatus, notifySubscribers } from '../../lib/newsletter';
 
 async function guard() {
   if (!(await isAdmin())) return NextResponse.json({ ok:false,error:'Unauthorized' },{status:401});
@@ -18,8 +19,26 @@ export async function POST(request){
   const blocked=await guard(); if(blocked) return blocked;
   try {
     const body=await request.json();
-    if(body.action==='saveBook') return NextResponse.json({ok:true,result:await saveBook(body.book)});
-    if(body.action==='saveChapter') return NextResponse.json({ok:true,result:await saveChapter(body.chapter)});
+    if(body.action==='saveBook') {
+      const previousStatus=await getPublicationStatus('book',body.book?.id);
+      const result=await saveBook(body.book);
+      let notification=null;
+      if(body.book?.status==='Published'&&previousStatus!=='Published') {
+        try { notification=await notifySubscribers('book',result.id); }
+        catch(error) { console.error('Subscriber notification failed:',error); notification={sent:0,error:true}; }
+      }
+      return NextResponse.json({ok:true,result,notification});
+    }
+    if(body.action==='saveChapter') {
+      const previousStatus=await getPublicationStatus('chapter',body.chapter?.id);
+      const result=await saveChapter(body.chapter);
+      let notification=null;
+      if(body.chapter?.status==='Published'&&previousStatus!=='Published') {
+        try { notification=await notifySubscribers('chapter',result.id); }
+        catch(error) { console.error('Subscriber notification failed:',error); notification={sent:0,error:true}; }
+      }
+      return NextResponse.json({ok:true,result,notification});
+    }
     if(body.action==='trashBook'){ await trashBook(body.id); return NextResponse.json({ok:true}); }
     if(body.action==='trashChapter'){ await trashChapter(body.id); return NextResponse.json({ok:true}); }
     if(body.action==='restoreBook'){ await restoreBook(body.id); return NextResponse.json({ok:true}); }
