@@ -1,4 +1,5 @@
 import './globals.css';
+import './ghost.css';
 
 export const metadata = {
   metadataBase: new URL('https://ghost-stories-society.vercel.app'),
