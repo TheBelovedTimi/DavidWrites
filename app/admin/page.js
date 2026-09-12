@@ -22,18 +22,18 @@ export default async function AdminPage({ searchParams }) {
   const query = await searchParams;
 
   if (!process.env.ADMIN_PASSWORD) {
-    return <main className="admin-page"><div className="admin-login"><div className="admin-card"><h1>David Writes Admin</h1><p className="error">ADMIN_PASSWORD is not configured for this deployment.</p></div></div></main>;
+    return <main className="admin-page"><div className="admin-login"><div className="admin-card"><h1>Ghost Stories Society Admin</h1><p className="error">ADMIN_PASSWORD is not configured for this deployment.</p></div></div></main>;
   }
 
   if (!authed) {
     return <main className="admin-page"><div className="admin-login"><div className="admin-card">
-      <div className="wordmark">DAVID//WRITES</div>
-      <h1 style={{marginTop:28}}>David Writes Admin</h1>
+      <div className="wordmark ghost-wordmark">GHOST STORIES SOCIETY</div>
+      <h1 style={{marginTop:28}}>Doctor's Writing Room</h1>
       <p className="muted">Private publishing dashboard.</p>
       <form action={loginAction}>
         <div className="field"><label>Admin password</label><input type="password" name="password" placeholder="Admin password" autoComplete="current-password" required /></div>
         {query?.error ? <p className="error">Incorrect password.</p> : null}
-        <button className="button primary" type="submit">Sign in</button>
+        <button className="button primary" type="submit">Enter</button>
       </form>
     </div></div></main>;
   }
