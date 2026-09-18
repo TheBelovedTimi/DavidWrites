@@ -4,6 +4,7 @@ import { hasDatabase, listBooks } from '../lib/db';
 import AdminClient from './AdminClient';
 import EditorCaretFix from './EditorCaretFix';
 import AdminHistoryBridge from './AdminHistoryBridge';
+import './studio.css';
 
 async function loginAction(formData) {
   'use server';
