@@ -38,3 +38,10 @@
 .admin-page .selection-bubble button{flex:0 0 42px!important;width:42px!important;height:42px!important;min-width:42px!important;font-size:15px!important;border-radius:3px!important;touch-action:manipulation}
 .admin-page .selection-bubble button[aria-label^="Heading"]{font-size:12px!important}
 @media(max-width:700px){.admin-page .selection-bubble{padding:8px;gap:4px;bottom:max(12px,env(safe-area-inset-bottom))}.admin-page .selection-bubble button{flex-basis:46px!important;width:46px!important;height:46px!important;min-width:46px!important;font-size:16px!important}}
+
+/* Manuscript heading contrast fix */
+.admin-page .studio-manuscript .continuous-writing-surface h1,
+.admin-page .studio-manuscript .continuous-writing-surface h2,
+.admin-page .studio-manuscript .continuous-writing-surface h3{
+  color:#2b2620 !important;
+}
