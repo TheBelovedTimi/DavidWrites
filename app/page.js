@@ -3,6 +3,7 @@ import { listBooks } from './lib/db';
 import LibraryBrowser from './components/LibraryBrowser';
 
 export const dynamic='force-dynamic';
+// Redeploy marker: Ghost production branch sync.
 
 export default async function HomePage() {
   const books=await listBooks();
